@@ -54,7 +54,7 @@ canvas{width:100%;height:auto;display:block;touch-action:none}
 
 <label>③ ショット位置</label>
 <button id="place" disabled>キャラ位置を指定</button>
-<div class="hint">ショットする味方キャラの中心をタップ。</div>
+<div class="hint">キャラ付近をタップすると中心を推定します。十字マークをドラッグして微調整できます。</div>
 
 <label>④ 照準・角度 <span class="val" id="angleVal">45.00°</span></label>
 <button id="aim" disabled>指・マウスで照準を操作</button>
@@ -78,6 +78,7 @@ canvas{width:100%;height:auto;display:block;touch-action:none}
 <button id="togglePurple" class="secondary" disabled>紫 ON/OFF</button>
 <button id="toggleBlue" class="secondary" disabled>青 ON/OFF</button>
 </div>
+
 <div id="status">画像を読み込んでください。</div>
 </section>
 
@@ -99,343 +100,587 @@ let boundsMode=false;
 let boundsPoints=[];
 let placing=false;
 let aiming=false;
-let dragging=false;
+let draggingAim=false;
+let draggingShooter=false;
 let trajectory=null;
 let purple=[];
 let blue=[];
 let showPurple=true;
 let showBlue=true;
 
-function status(t){$('status').textContent=t}
+function status(t){
+ $('status').textContent=t;
+}
 
 function enable(v){
-['bounds','resetBounds','place','aim','trajectory','erase',
-'detect','clear','togglePurple','toggleBlue']
-.forEach(id=>$(id).disabled=!v);
+ [
+ 'bounds','resetBounds','place','aim','trajectory','erase',
+ 'detect','clear','togglePurple','toggleBlue'
+ ].forEach(id=>$(id).disabled=!v);
 }
 
 function point(e){
-const r=canvas.getBoundingClientRect();
-return {
-x:(e.clientX-r.left)*canvas.width/r.width,
-y:(e.clientY-r.top)*canvas.height/r.height
-};
+ const r=canvas.getBoundingClientRect();
+ return {
+  x:(e.clientX-r.left)*canvas.width/r.width,
+  y:(e.clientY-r.top)*canvas.height/r.height
+ };
 }
 
 function draw(){
-if(!img)return;
-ctx.clearRect(0,0,canvas.width,canvas.height);
-ctx.drawImage(img,0,0,canvas.width,canvas.height);
+ if(!img)return;
 
-if(bounds){
-ctx.save();
-ctx.strokeStyle='#55e6a5';
-ctx.lineWidth=Math.max(3,canvas.width/350);
-ctx.setLineDash([12,8]);
-ctx.strokeRect(bounds.left,bounds.top,
-bounds.right-bounds.left,bounds.bottom-bounds.top);
-ctx.restore();
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+ if(bounds){
+  ctx.save();
+  ctx.strokeStyle='#55e6a5';
+  ctx.lineWidth=Math.max(3,canvas.width/350);
+  ctx.setLineDash([12,8]);
+  ctx.strokeRect(
+   bounds.left,
+   bounds.top,
+   bounds.right-bounds.left,
+   bounds.bottom-bounds.top
+  );
+  ctx.restore();
+ }
+
+ boundsPoints.forEach(p=>{
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,10,0,Math.PI*2);
+  ctx.fillStyle='#55e6a5';
+  ctx.fill();
+ });
+
+ if(showPurple)purple.forEach(o=>{
+  ctx.beginPath();
+  ctx.arc(o.x,o.y,o.r,0,Math.PI*2);
+  ctx.strokeStyle='#ff55ff';
+  ctx.lineWidth=3;
+  ctx.stroke();
+ });
+
+ if(showBlue)blue.forEach(o=>{
+  ctx.strokeStyle='#40e8ff';
+  ctx.lineWidth=3;
+  ctx.strokeRect(o.x-o.w/2,o.y-o.h/2,o.w,o.h);
+ });
+
+ // ショット位置の十字マーク
+ if(shooter){
+  const x=shooter.x;
+  const y=shooter.y;
+  const size=Math.max(18,canvas.width/45);
+
+  ctx.save();
+  ctx.strokeStyle='#ffe34d';
+  ctx.lineWidth=Math.max(3,canvas.width/250);
+
+  ctx.beginPath();
+  ctx.arc(x,y,size*.55,0,Math.PI*2);
+  ctx.moveTo(x-size,y);
+  ctx.lineTo(x+size,y);
+  ctx.moveTo(x,y-size);
+  ctx.lineTo(x,y+size);
+  ctx.stroke();
+
+  ctx.fillStyle='#ffffff';
+  ctx.beginPath();
+  ctx.arc(x,y,Math.max(3,canvas.width/250),0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+ }
+
+ if(trajectory&&trajectory.length>1){
+  ctx.beginPath();
+  ctx.moveTo(trajectory[0].x,trajectory[0].y);
+  trajectory.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
+  ctx.strokeStyle='#ff3c42';
+  ctx.lineWidth=Math.max(3,canvas.width/280);
+  ctx.stroke();
+ }
 }
 
-boundsPoints.forEach(p=>{
-ctx.beginPath();
-ctx.arc(p.x,p.y,10,0,Math.PI*2);
-ctx.fillStyle='#55e6a5';
-ctx.fill();
-});
-
-if(showPurple)purple.forEach(o=>{
-ctx.beginPath();
-ctx.arc(o.x,o.y,o.r,0,Math.PI*2);
-ctx.strokeStyle='#ff55ff';
-ctx.lineWidth=3;
-ctx.stroke();
-});
-
-if(showBlue)blue.forEach(o=>{
-ctx.strokeStyle='#40e8ff';
-ctx.lineWidth=3;
-ctx.strokeRect(o.x-o.w/2,o.y-o.h/2,o.w,o.h);
-});
-
-if(shooter){
-ctx.beginPath();
-ctx.arc(shooter.x,shooter.y,Math.max(8,canvas.width/95),0,Math.PI*2);
-ctx.fillStyle='#ffdf45';
-ctx.fill();
-ctx.strokeStyle='#171717';
-ctx.lineWidth=2;
-ctx.stroke();
-}
-
-if(trajectory&&trajectory.length>1){
-ctx.beginPath();
-ctx.moveTo(trajectory[0].x,trajectory[0].y);
-trajectory.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));
-ctx.strokeStyle='#ff3c42';
-ctx.lineWidth=Math.max(3,canvas.width/280);
-ctx.stroke();
-}
-}
-
+// 画像読み込み
 $('file').addEventListener('change',()=>{
-const f=$('file').files[0];
-if(!f)return;
-const url=URL.createObjectURL(f);
-const im=new Image();
-im.onload=()=>{
-img=im;
-canvas.width=im.naturalWidth;
-canvas.height=im.naturalHeight;
-shooter=null;
-bounds=null;
-boundsPoints=[];
-trajectory=null;
-purple=[];
-blue=[];
-enable(true);
-draw();
-status('画像を読み込みました。\\nまずステージ範囲を指定してください。');
-URL.revokeObjectURL(url);
-};
-im.onerror=()=>status('画像を読み込めませんでした。');
-im.src=url;
+ const f=$('file').files[0];
+ if(!f)return;
+
+ const url=URL.createObjectURL(f);
+ const im=new Image();
+
+ im.onload=()=>{
+  img=im;
+  canvas.width=im.naturalWidth;
+  canvas.height=im.naturalHeight;
+
+  shooter=null;
+  bounds=null;
+  boundsPoints=[];
+  trajectory=null;
+  purple=[];
+  blue=[];
+
+  placing=false;
+  aiming=false;
+  draggingAim=false;
+  draggingShooter=false;
+  boundsMode=false;
+
+  enable(true);
+  draw();
+
+  status('画像を読み込みました。\nまずステージ範囲を指定してください。');
+  URL.revokeObjectURL(url);
+ };
+
+ im.onerror=()=>{
+  status('画像を読み込めませんでした。');
+  URL.revokeObjectURL(url);
+ };
+
+ im.src=url;
 });
 
+// ステージ範囲指定
 $('bounds').onclick=()=>{
-boundsMode=true;
-boundsPoints=[];
-placing=false;
-aiming=false;
-trajectory=null;
-status('ステージの左上をタップしてください。');
-draw();
+ boundsMode=true;
+ boundsPoints=[];
+ placing=false;
+ aiming=false;
+ trajectory=null;
+
+ status('ステージの左上をタップしてください。');
+ draw();
 };
 
 $('resetBounds').onclick=()=>{
-bounds=null;
-boundsPoints=[];
-trajectory=null;
-draw();
-status('範囲をリセットしました。');
+ bounds=null;
+ boundsPoints=[];
+ trajectory=null;
+ draw();
+ status('範囲をリセットしました。');
 };
 
+// ショット位置指定
 $('place').onclick=()=>{
-placing=true;
-boundsMode=false;
-aiming=false;
-status('ショットするキャラの中心をタップしてください。');
+ placing=true;
+ boundsMode=false;
+ aiming=false;
+ draggingAim=false;
+ draggingShooter=false;
+
+ status('ショットする味方キャラの付近をタップしてください。');
 };
 
+// 照準操作
 $('aim').onclick=()=>{
-if(!shooter){
-status('先にショット位置を指定してください。');
-return;
-}
-aiming=true;
-placing=false;
-boundsMode=false;
-status('キャラから狙いたい方向へドラッグしてください。');
+ if(!shooter){
+  status('先にショット位置を指定してください。');
+  return;
+ }
+
+ aiming=true;
+ placing=false;
+ boundsMode=false;
+ draggingShooter=false;
+
+ status('キャラから狙いたい方向へドラッグしてください。');
 };
 
+// タップ位置の周辺から中心候補を推定
+function estimateCenter(px,py){
+ const radius=36;
+
+ const left=Math.max(0,Math.floor(px-radius));
+ const top=Math.max(0,Math.floor(py-radius));
+ const right=Math.min(canvas.width,Math.ceil(px+radius));
+ const bottom=Math.min(canvas.height,Math.ceil(py+radius));
+
+ const data=ctx.getImageData(
+  left,top,right-left,bottom-top
+ ).data;
+
+ let sum=0;
+ let sx=0;
+ let sy=0;
+
+ for(let y=top;y<bottom;y+=2){
+  for(let x=left;x<right;x+=2){
+   const dx=x-px;
+   const dy=y-py;
+   const d2=dx*dx+dy*dy;
+
+   if(d2>radius*radius)continue;
+
+   const i=((y-top)*(right-left)+(x-left))*4;
+
+   const r=data[i]/255;
+   const g=data[i+1]/255;
+   const b=data[i+2]/255;
+
+   const max=Math.max(r,g,b);
+   const min=Math.min(r,g,b);
+   const saturation=max===0?0:(max-min)/max;
+   const brightness=max;
+
+   const distanceWeight=Math.exp(-d2/(2*22*22));
+   const weight=(0.2+saturation)*(0.4+brightness)*distanceWeight;
+
+   sum+=weight;
+   sx+=x*weight;
+   sy+=y*weight;
+  }
+ }
+
+ if(sum===0)return {x:px,y:py};
+
+ const estimated={
+  x:sx/sum,
+  y:sy/sum
+ };
+
+ const shift=Math.hypot(estimated.x-px,estimated.y-py);
+
+ // 推定位置が大きく離れた場合はタップ位置を優先
+ if(shift>15)return {x:px,y:py};
+
+ return estimated;
+}
+
+// 画面操作
 canvas.addEventListener('pointerdown',e=>{
-if(!img)return;
-const p=point(e);
+ if(!img)return;
 
-if(boundsMode){
-boundsPoints.push(p);
-if(boundsPoints.length===1){
-status('左上を設定しました。次に右下をタップしてください。');
-}else{
-const a=boundsPoints[0],b=boundsPoints[1];
-bounds={
-left:Math.min(a.x,b.x),
-right:Math.max(a.x,b.x),
-top:Math.min(a.y,b.y),
-bottom:Math.max(a.y,b.y)
-};
-boundsPoints=[];
-boundsMode=false;
-draw();
-status('ステージ範囲を設定しました。緑の枠を確認してください。');
-}
-draw();
-return;
-}
+ const p=point(e);
 
-if(placing){
-shooter=p;
-placing=false;
-trajectory=null;
-draw();
-status('ショット位置を設定しました。照準ボタンを押してください。');
-return;
-}
+ // ステージ範囲指定
+ if(boundsMode){
+  boundsPoints.push(p);
 
-if(aiming&&shooter){
-dragging=true;
-canvas.setPointerCapture(e.pointerId);
-updateAim(p);
-}
+  if(boundsPoints.length===1){
+   status('左上を設定しました。次に右下をタップしてください。');
+  }else{
+   const a=boundsPoints[0];
+   const b=boundsPoints[1];
+
+   bounds={
+    left:Math.min(a.x,b.x),
+    right:Math.max(a.x,b.x),
+    top:Math.min(a.y,b.y),
+    bottom:Math.max(a.y,b.y)
+   };
+
+   boundsPoints=[];
+   boundsMode=false;
+
+   status('ステージ範囲を設定しました。緑の枠を確認してください。');
+  }
+
+  draw();
+  return;
+ }
+
+ // ショット位置の自動推定
+ if(placing){
+  shooter=estimateCenter(p.x,p.y);
+  placing=false;
+  trajectory=null;
+
+  draw();
+
+  status(
+   '中心位置を自動推定しました。\n'+
+   '十字マークを指でドラッグすると位置を調整できます。\n'+
+   '角度を設定して「軌道を表示」を押してください。'
+  );
+  return;
+ }
+
+ // 十字マークの手動調整
+ if(shooter&&!aiming){
+  const distance=Math.hypot(
+   p.x-shooter.x,
+   p.y-shooter.y
+  );
+
+  const hitRadius=Math.max(35,canvas.width/22);
+
+  if(distance<hitRadius){
+   draggingShooter=true;
+   canvas.setPointerCapture(e.pointerId);
+   e.preventDefault();
+   return;
+  }
+ }
+
+ // 照準操作
+ if(aiming&&shooter){
+  draggingAim=true;
+  canvas.setPointerCapture(e.pointerId);
+  updateAim(p);
+  e.preventDefault();
+ }
 });
 
-function updateAim(p){
-const dx=p.x-shooter.x;
-const dy=p.y-shooter.y;
-if(Math.hypot(dx,dy)<5)return;
-
-let deg=Math.atan2(-dy,dx)*180/Math.PI;
-deg=(deg+360)%360;
-let snapped=Math.round(deg/0.35)*0.35;
-snapped=Math.min(359.65,Math.max(0,snapped));
-
-$('angle').value=snapped;
-$('angleVal').textContent=snapped.toFixed(2)+'°';
-makePath();
-}
-
+// ショット位置をドラッグして調整
 canvas.addEventListener('pointermove',e=>{
-if(dragging)updateAim(point(e));
+ if(draggingShooter){
+  const p=point(e);
+
+  shooter={
+   x:Math.max(0,Math.min(canvas.width,p.x)),
+   y:Math.max(0,Math.min(canvas.height,p.y))
+  };
+
+  trajectory=null;
+  draw();
+  e.preventDefault();
+  return;
+ }
+
+ if(draggingAim){
+  updateAim(point(e));
+ }
 });
+
+// 照準角度の更新
+function updateAim(p){
+ const dx=p.x-shooter.x;
+ const dy=p.y-shooter.y;
+
+ if(Math.hypot(dx,dy)<5)return;
+
+ let deg=Math.atan2(-dy,dx)*180/Math.PI;
+ deg=(deg+360)%360;
+
+ let snapped=Math.round(deg/0.35)*0.35;
+ snapped=Math.min(359.65,Math.max(0,snapped));
+
+ $('angle').value=snapped;
+ $('angleVal').textContent=snapped.toFixed(2)+'°';
+
+ makePath();
+}
 
 function endDrag(){
-if(dragging){
-dragging=false;
-aiming=false;
-status('照準を設定しました。');
+ if(draggingShooter){
+  draggingShooter=false;
+  status(
+   '中心位置を調整しました。\n'+
+   '角度を設定して「軌道を表示」を押してください。'
+  );
+ }
+
+ if(draggingAim){
+  draggingAim=false;
+  aiming=false;
+  status('照準を設定しました。');
+ }
 }
-}
+
 canvas.addEventListener('pointerup',endDrag);
 canvas.addEventListener('pointercancel',endDrag);
 
+// 軌道計算
 function makePath(){
-if(!shooter||!bounds){
-status('先にショット位置とステージ範囲を設定してください。');
-return;
-}
+ if(!shooter||!bounds){
+  status('先にショット位置とステージ範囲を設定してください。');
+  return;
+ }
 
-const angle=Number($('angle').value)*Math.PI/180;
-const bounces=Number($('bounces').value);
-const b=bounds;
+ const angle=Number($('angle').value)*Math.PI/180;
+ const bounces=Number($('bounces').value);
+ const b=bounds;
 
-let x=shooter.x,y=shooter.y;
-let dx=Math.cos(angle),dy=-Math.sin(angle);
-let pts=[{x,y}],hits=0;
+ let x=shooter.x;
+ let y=shooter.y;
 
-if(x<b.left||x>b.right||y<b.top||y>b.bottom){
-status('ショット位置が緑の枠の外です。');
-return;
-}
+ let dx=Math.cos(angle);
+ let dy=-Math.sin(angle);
 
-for(let step=0;step<10000&&hits<=bounces;step++){
-let tx=Infinity,ty=Infinity;
-if(dx>0)tx=(b.right-x)/dx;
-else if(dx<0)tx=(b.left-x)/dx;
-if(dy>0)ty=(b.bottom-y)/dy;
-else if(dy<0)ty=(b.top-y)/dy;
+ let pts=[{x,y}];
+ let hits=0;
 
-const d=Math.min(tx,ty);
-if(!isFinite(d)||d<=0)break;
+ if(
+  x<b.left||x>b.right||
+  y<b.top||y>b.bottom
+ ){
+  status('ショット位置が緑の枠の外です。');
+  return;
+ }
 
-x+=dx*d;
-y+=dy*d;
-pts.push({x,y});
-hits++;
+ for(let step=0;step<10000&&hits<=bounces;step++){
+  let tx=Infinity;
+  let ty=Infinity;
 
-if(hits>bounces)break;
+  if(dx>0)tx=(b.right-x)/dx;
+  else if(dx<0)tx=(b.left-x)/dx;
 
-if(Math.abs(tx-ty)<0.01){
-dx=-dx;dy=-dy;
-}else if(tx<ty){
-dx=-dx;
-}else{
-dy=-dy;
-}
-}
+  if(dy>0)ty=(b.bottom-y)/dy;
+  else if(dy<0)ty=(b.top-y)/dy;
 
-trajectory=pts;
-draw();
-status('軌道を表示しました。\\n※現在は指定範囲の壁反射のみ対応。敵やブロックとの衝突は未対応です。');
+  const d=Math.min(tx,ty);
+
+  if(!isFinite(d)||d<=0)break;
+
+  x+=dx*d;
+  y+=dy*d;
+
+  pts.push({x,y});
+  hits++;
+
+  if(hits>bounces)break;
+
+  if(Math.abs(tx-ty)<0.01){
+   dx=-dx;
+   dy=-dy;
+  }else if(tx<ty){
+   dx=-dx;
+  }else{
+   dy=-dy;
+  }
+ }
+
+ trajectory=pts;
+ draw();
+
+ status(
+  '軌道を表示しました。\n'+
+  '※現在は指定範囲の壁反射のみ対応。敵やブロックとの衝突は未対応です。'
+ );
 }
 
 $('trajectory').onclick=makePath;
+
 $('erase').onclick=()=>{
-trajectory=null;
-draw();
+ trajectory=null;
+ draw();
+ status('軌道を消しました。');
 };
 
+// 角度スライダー
 $('angle').oninput=()=>{
-$('angleVal').textContent=(+$('angle').value).toFixed(2)+'°';
-if(shooter&&bounds)makePath();
+ $('angleVal').textContent=
+  Number($('angle').value).toFixed(2)+'°';
+
+ if(shooter&&bounds)makePath();
 };
 
+// 反射回数スライダー
 $('bounces').oninput=()=>{
-$('bounceVal').textContent=$('bounces').value;
-if(shooter&&bounds)makePath();
+ $('bounceVal').textContent=$('bounces').value;
+
+ if(shooter&&bounds)makePath();
 };
 
+// 色検出用HSV変換
 function hsv(r,g,b){
-r/=255;g/=255;b/=255;
-const max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;
-let h=0;
-if(d){
-if(max===r)h=(g-b)/d+(g<b?6:0);
-else if(max===g)h=(b-r)/d+2;
-else h=(r-g)/d+4;
-h*=60;
-}
-return [h,max===0?0:d/max,max];
+ r/=255;
+ g/=255;
+ b/=255;
+
+ const max=Math.max(r,g,b);
+ const min=Math.min(r,g,b);
+ const d=max-min;
+
+ let h=0;
+
+ if(d){
+  if(max===r)h=(g-b)/d+(g<b?6:0);
+  else if(max===g)h=(b-r)/d+2;
+  else h=(r-g)/d+4;
+
+  h*=60;
+ }
+
+ return [
+  h,
+  max===0?0:d/max,
+  max
+ ];
 }
 
+// ギミック候補検出
 function detect(){
-if(!img)return;
-status('画像を解析中...');
-const scale=Math.min(1,700/Math.max(canvas.width,canvas.height));
-const w=Math.round(canvas.width*scale);
-const h=Math.round(canvas.height*scale);
-const tmp=document.createElement('canvas');
-tmp.width=w;tmp.height=h;
-const t=tmp.getContext('2d',{willReadFrequently:true});
-t.drawImage(img,0,0,w,h);
-const data=t.getImageData(0,0,w,h).data;
+ if(!img)return;
 
-purple=[];
-blue=[];
+ status('画像を解析中...');
 
-for(let y=0;y<h;y+=3){
-for(let x=0;x<w;x+=3){
-const i=(y*w+x)*4;
-const [hh,s,v]=hsv(data[i],data[i+1],data[i+2]);
+ const scale=Math.min(
+  1,
+  700/Math.max(canvas.width,canvas.height)
+ );
 
-if(s>.5&&v>.35&&hh>=255&&hh<=315){
-purple.push({x:x/scale,y:y/scale});
-}
-if(s>.4&&v>.45&&hh>=175&&hh<=215){
-blue.push({x:x/scale,y:y/scale});
-}
-}
-}
+ const w=Math.round(canvas.width*scale);
+ const h=Math.round(canvas.height*scale);
 
-draw();
-status('色の候補を検出しました。\\n紫候補 '+purple.length+'点／青候補 '+blue.length+'点\\n※色による簡易検出です。');
+ const tmp=document.createElement('canvas');
+ tmp.width=w;
+ tmp.height=h;
+
+ const t=tmp.getContext('2d',{willReadFrequently:true});
+ t.drawImage(img,0,0,w,h);
+
+ const data=t.getImageData(0,0,w,h).data;
+
+ purple=[];
+ blue=[];
+
+ for(let y=0;y<h;y+=3){
+  for(let x=0;x<w;x+=3){
+   const i=(y*w+x)*4;
+
+   const [hh,s,v]=hsv(
+    data[i],
+    data[i+1],
+    data[i+2]
+   );
+
+   if(s>.5&&v>.35&&hh>=255&&hh<=315){
+    purple.push({
+     x:x/scale,
+     y:y/scale
+    });
+   }
+
+   if(s>.4&&v>.45&&hh>=175&&hh<=215){
+    blue.push({
+     x:x/scale,
+     y:y/scale
+    });
+   }
+  }
+ }
+
+ draw();
+
+ status(
+  '色の候補を検出しました。\n'+
+  '紫候補 '+purple.length+'点／青候補 '+blue.length+'点\n'+
+  '※色による簡易検出です。'
+ );
 }
 
 $('detect').onclick=detect;
 
 $('clear').onclick=()=>{
-purple=[];blue=[];
-draw();
-status('検出表示を消しました。');
+ purple=[];
+ blue=[];
+ draw();
+ status('検出表示を消しました。');
 };
 
 $('togglePurple').onclick=()=>{
-showPurple=!showPurple;
-draw();
+ showPurple=!showPurple;
+ draw();
 };
 
 $('toggleBlue').onclick=()=>{
-showBlue=!showBlue;
-draw();
+ showBlue=!showBlue;
+ draw();
 };
 
 })();
